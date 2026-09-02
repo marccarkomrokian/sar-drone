@@ -1,0 +1,221 @@
+================================================================================
+          PROJECT MASTER PLAN & ARCHITECTURE SPECIFICATION
+      Search-and-Rescue (SAR) Drone Companion Computer Subsystem
+================================================================================
+
+1. PROJECT OVERVIEW & STRATEGIC GOALS
+--------------------------------------------------------------------------------
+Project Name    : Project Aetheris (SAR Telemetry & Vision Companion Node)
+Primary Languages: Rust (`no_std` compatible modules + async Tokio), C++20 (OpenCV)
+Target Hardware : Raspberry Pi 4/5 or NVIDIA Jetson Orin Nano (ARM64)
+System OS       : Linux (Embedded Ubuntu / Yocto)
+License         : Dual MIT / Apache-2.0
+Repository      : Public GitHub (Main Branch Protected)
+
+Key Objectives:
+1. Build a real-time, low-latency companion computer subsystem for drones that
+   processes thermal/visual feed, detects high-heat targets (lost person / fire),
+   and streams georeferenced tracking data to ground stations via MAVLink/CoT.
+2. Achieve strict decouple between Computer Vision (C++) and Telemetry (Rust) 
+   using high-performance POSIX Shared Memory IPC.
+3. Enable 100% hardware-free development and integration using Synthetic Video
+   datasets and ArduPilot/PX4 SITL (Software-In-The-Loop) simulation.
+4. Establish professional engineering practices (CI/CD, unit tests, code reviews,
+   C-ABI cross-language safety) suitable for top-tier college portfolios.
+
+
+2. SYSTEM ARCHITECTURE & DATA FLOW
+--------------------------------------------------------------------------------
+[ Camera / Synthetic MP4 ] ---> [ C++ OpenCV Vision Engine ]
+                                        |
+                                        v (Writes at ~30 FPS)
+                               [ POSIX Shared Memory ]
+                                        |
+                                        v (Reads at ~30 FPS)
+[ SITL / Flight Controller ] -> [ Rust Telemetry Daemon ] -> [ UDP / LoRa Radio ]
+  (MAVLink GPS Telemetry)               |                           |
+                                        +----> [ Target Calc ] -----+
+                                                  (Geo-mapping)
+
+Data Pipeline Breakdown:
+1. Vision Engine (C++): Captures frame -> applies Gaussian blur, thresholding,
+   contour detection -> calculates target centroid -> writes to POSIX Shared Memory.
+2. Telemetry Daemon (Rust): Connects to Flight Controller over UDP/Serial -> parses
+   drone GPS (Lat, Lon, Alt, Heading) via MAVLink -> reads target centroid from SHM
+   -> computes absolute target GPS -> packages & broadcasts MAVLink / CoT packets.
+
+
+3. INTER-PROCESS COMMUNICATION (IPC) CONTRACT
+--------------------------------------------------------------------------------
+Shared Memory Identifier: `/sar_target_shm`
+Semaphore / Lock Name   : `/sar_target_mutex`
+
+Shared Header Definition (`target_data.h`):
+--------------------------------------------------------------------------------
+#ifndef TARGET_DATA_H
+#define TARGET_DATA_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    uint64_t timestamp_ms;   // Unix epoch timestamp in milliseconds
+    uint32_t frame_id;       // Incrementing frame index
+    float target_x_offset;   // Normalized offset from frame center (-1.0 to 1.0)
+    float target_y_offset;   // Normalized offset from frame center (-1.0 to 1.0)
+    float confidence;        // Detection confidence (0.0 to 1.0)
+    uint8_t target_detected; // 1 if target present, 0 if search area clear
+    uint8_t reserved[3];     // Padding alignment for 64-bit boundaries
+} TargetData;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // TARGET_DATA_H
+--------------------------------------------------------------------------------
+
+
+4. ROLE DIVISION & RESPONSIBILITY MATRIX
+--------------------------------------------------------------------------------
++--------------------------+----------------------------+----------------------------+
+| Domain / Module          | Partner A (C++ Lead)       | Partner B (Rust Lead)      |
++--------------------------+----------------------------+----------------------------+
+| Core Logic               | Computer Vision Engine     | Telemetry Daemon           |
+|                          | (OpenCV frame processing,  | (MAVLink parser, async     |
+|                          | hotspot contour extraction)| networking, UDP sockets)   |
++--------------------------+----------------------------+----------------------------+
+| IPC System               | Shared Memory Writer       | Shared Memory Reader       |
+|                          | (`shm_open`, `mmap`, mutex | (Safe Rust FFI wrapper,    |
+|                          | lock writing)              | lock acquisition)          |
++--------------------------+----------------------------+----------------------------+
+| Simulation / Mocking     | Synthetic Thermal Video    | ArduPilot/PX4 SITL         |
+|                          | Dataset Streamer           | Local Simulator & GCS Mock |
++--------------------------+----------------------------+----------------------------+
+| Integration              | Centroid filtering &       | Coordinate Offset          |
+|                          | multi-target tracking      | Georeferencing Math        |
++--------------------------+----------------------------+----------------------------+
+| Build & Infra            | CMake Build Configuration, | Cargo Workspace Setup,     |
+|                          | OpenCV dependency links    | Cross-compile target setup |
++--------------------------+----------------------------+----------------------------+
+
+
+5. 4-WEEK PHASED DEVELOPMENT ROADMAP
+--------------------------------------------------------------------------------
+PHASE 1: WEEK 1 - ARCHITECTURE, SETUP & HARDWARE-FREE INFRASTRUCTURE
+--------------------------------------------------------------------------------
+Joint Deliverables:
+  [ ] Freeze `target_data.h` header definition.
+  [ ] Create public GitHub repo with MIT/Apache-2.0 license.
+  [ ] Establish branch protection rules on `main`.
+
+Partner A (C++):
+  [ ] Set up CMake project structure with OpenCV dependency fetching.
+  [ ] Create `VideoFeedSim` class to load local MP4 thermal datasets and extract
+      frames in a 30 FPS loop.
+  [ ] Implement initial POSIX `shm_open` setup for creating and writing dummy structs.
+
+Partner B (Rust):
+  [ ] Initialize Cargo workspace with `tokio`, `mavlink`, and `libc` dependencies.
+  [ ] Launch ArduPilot SITL locally (`sim_vehicle.py -v ArduCopter`).
+  [ ] Implement async MAVLink UDP socket handler receiving `GLOBAL_POSITION_INT`
+      and `ATTITUDE` messages from 127.0.0.1:14550.
+
+
+PHASE 2: WEEK 2 - ISOLATED SUBSYSTEM IMPLEMENTATION
+--------------------------------------------------------------------------------
+Partner A (C++):
+  [ ] Develop image thresholding pipeline: Grayscale -> Gaussian Blur -> Adaptive
+      Thresholding / InRange -> Contour Extraction.
+  [ ] Calculate target bounding box, centroid, and normalized X/Y screen offsets.
+  [ ] Thread-safe writing of `TargetData` into POSIX shared memory with mutex locks.
+
+Partner B (Rust):
+  [ ] Write safe Rust bindings (`unsafe` block abstraction) to read `TargetData`
+      from `/sar_target_shm`.
+  [ ] Build target coordinate projection module: convert drone GPS + Heading +
+      Gimbal pitch/yaw + camera FOV + target pixel offset into target Lat/Lon.
+  [ ] Format target locations into MAVLink `STATUSTEXT` or custom MAVLink messages.
+
+
+PHASE 3: WEEK 3 - END-TO-END INTEGRATION & SYSTEM SIMULATION
+--------------------------------------------------------------------------------
+Joint Deliverables:
+  [ ] Execute end-to-end simulation pipeline (Video dataset -> C++ SHM -> Rust
+      Georeferencer -> MAVLink packet broadcast -> QGroundControl map).
+  [ ] Perform end-to-end integration testing and optimize system throughput.
+
+Partner A (C++):
+  [ ] Add multi-frame noise filtering (Kalman Filter or Simple Centroid Tracking)
+      to eliminate single-frame false heat flashes.
+
+Partner B (Rust):
+  [ ] Implement Cursor-on-Target (CoT) XML/Protobuf encoder for military/search-and-rescue
+      map software (e.g., TAK / ATAK integration).
+  [ ] Build network reconnect logic for dropping/re-establishing MAVLink connections.
+
+
+PHASE 4: WEEK 4 - HARDWARE READINESS, BENCHMARKING & DOCUMENTATION
+--------------------------------------------------------------------------------
+Joint Deliverables:
+  [ ] Set up GitHub Actions CI workflow (Build C++ CMake + cargo test + clippy/clang-format).
+  [ ] Write comprehensive `README.md` with system architecture diagram, build instructions,
+      and execution screenshots.
+
+Partner A (C++):
+  [ ] Benchmark C++ vision processing execution time per frame on x86_64 and test
+      memory leakage using Valgrind.
+
+Partner B (Rust):
+  [ ] Configure `cross` for cross-compiling ARM64 (`aarch64-unknown-linux-gnu`) binaries
+      ready for single-board computer deployment.
+  [ ] Finalize unit tests for telemetry math and shared memory deserialization.
+
+
+6. GIT WORKFLOW & COLLABORATION GUIDELINES
+--------------------------------------------------------------------------------
+1. Branching Naming Convention:
+   - `feature/vision-contour-detection` (Partner A)
+   - `feature/rust-mavlink-parser` (Partner B)
+   - `fix/shm-mutex-deadlock`
+
+2. Commit Message Standard:
+   - Use Conventional Commits standard:
+     `feat(vision): add gaussian blur preprocessing step`
+     `fix(telemetry): correct lat/lon integer scaling in mavlink packet`
+
+3. Pull Request (PR) Policy:
+   - No direct pushes to `main`.
+   - Every PR requires at least 1 code review approval from the other partner.
+   - All CI checks (automated compilation and tests) must pass before merging.
+
+
+7. SIMULATION SETUP GUIDE (NO HARDWARE NEEDED)
+--------------------------------------------------------------------------------
+1. Video Feed Simulation (Partner A):
+   - Download FLIR thermal dataset or thermal drone video sample (MP4 format).
+   - Pass file path as command line argument to C++ executable:
+     `./sar_vision_node --input ./assets/thermal_test.mp4`
+
+2. Flight Telemetry Simulation (Partner B):
+   - Install ArduPilot SITL / Docker container for SITL.
+   - Run command: `sim_vehicle.py -v ArduCopter --console --map`
+   - Connect Rust daemon to UDP port `14550`.
+
+
+8. COLLEGE APPLICATION & PORTFOLIO HIGHLIGHTS
+--------------------------------------------------------------------------------
+When describing this project on college applications (Common App / MIT Maker Portfolio /
+Stanford Supplemental), emphasize the following engineering achievements:
+
+- Systems-Level Mastery: Low-latency C-ABI interoperability between C++20 and Rust.
+- Real-Time IPC: Microsecond-level POSIX Shared Memory synchronization under dynamic lock conditions.
+- Real-World Utility: Emergency response application solving off-grid search-and-rescue delay.
+- Embedded Systems & Simulation: Cross-compilation for ARM64 architectures and Hardware-In-The-Loop
+  simulation methodologies.
+- Open Source Leadership: Collaborative software engineering using GitHub pull requests, CI/CD,
+  and production-grade documentation.
+================================================================================
