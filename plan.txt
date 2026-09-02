@@ -50,33 +50,7 @@ Data Pipeline Breakdown:
 Shared Memory Identifier: `/sar_target_shm`
 Semaphore / Lock Name   : `/sar_target_mutex`
 
-Shared Header Definition (`target_data.h`):
---------------------------------------------------------------------------------
-#ifndef TARGET_DATA_H
-#define TARGET_DATA_H
 
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef struct {
-    uint64_t timestamp_ms;   // Unix epoch timestamp in milliseconds
-    uint32_t frame_id;       // Incrementing frame index
-    float target_x_offset;   // Normalized offset from frame center (-1.0 to 1.0)
-    float target_y_offset;   // Normalized offset from frame center (-1.0 to 1.0)
-    float confidence;        // Detection confidence (0.0 to 1.0)
-    uint8_t target_detected; // 1 if target present, 0 if search area clear
-    uint8_t reserved[3];     // Padding alignment for 64-bit boundaries
-} TargetData;
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // TARGET_DATA_H
---------------------------------------------------------------------------------
 
 
 4. ROLE DIVISION & RESPONSIBILITY MATRIX
