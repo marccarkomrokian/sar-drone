@@ -20,8 +20,6 @@ Key Objectives:
    using high-performance POSIX Shared Memory IPC.
 3. Enable 100% hardware-free development and integration using Synthetic Video
    datasets and ArduPilot/PX4 SITL (Software-In-The-Loop) simulation.
-4. Establish professional engineering practices (CI/CD, unit tests, code reviews,
-   C-ABI cross-language safety) suitable for top-tier college portfolios.
 
 
 2. SYSTEM ARCHITECTURE & DATA FLOW
